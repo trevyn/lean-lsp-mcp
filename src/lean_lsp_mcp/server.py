@@ -850,12 +850,28 @@ def multi_attempt(
     client: LeanLSPClient = ctx.request_context.lifespan_context.client
     client.open_file(rel_path)
 
+    # Get indentation from the original line to preserve context
+    try:
+        file_content = get_file_contents(file_path)
+        lines = file_content.splitlines()
+        if 0 < line <= len(lines):
+            original_line = lines[line - 1]
+            # Extract leading whitespace
+            indent = len(original_line) - len(original_line.lstrip())
+            indent_str = original_line[:indent]
+        else:
+            indent_str = ""
+    except Exception:
+        indent_str = ""
+
     try:
         results: List[AttemptResult] = []
         # Avoid mutating caller-provided snippets; normalize locally per attempt
         for snippet in snippets:
             snippet_str = snippet.rstrip("\n")
-            payload = f"{snippet_str}\n"
+            # Prepend indentation to preserve tactic context
+            indented_snippet = indent_str + snippet_str
+            payload = f"{indented_snippet}\n"
             # Create a DocumentContentChange for the snippet
             change = DocumentContentChange(
                 payload,
@@ -867,8 +883,8 @@ def multi_attempt(
             diag = client.get_diagnostics(rel_path)
             check_lsp_response(diag, "get_diagnostics")
             filtered_diag = filter_diagnostics_by_position(diag, line - 1, None)
-            # Use the snippet text length without any trailing newline for the column
-            goal_result = client.get_goal(rel_path, line - 1, len(snippet_str))
+            # Use the indented snippet length without trailing newline for the column
+            goal_result = client.get_goal(rel_path, line - 1, len(indented_snippet))
             goals = extract_goals_list(goal_result)
             results.append(
                 AttemptResult(
